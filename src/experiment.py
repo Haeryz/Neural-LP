@@ -4,6 +4,7 @@ import time
 import pickle
 from collections import Counter
 import numpy as np
+from functools import reduce
 from utils import list_rules, print_rules
 
 
@@ -51,7 +52,7 @@ class Experiment():
     def one_epoch(self, mode, num_batch, next_fn):
         epoch_loss = []
         epoch_in_top = []
-        for batch in xrange(num_batch):
+        for batch in range(num_batch):
             if (batch+1) % max(1, (num_batch / self.option.print_per_batch)) == 0:
                 sys.stdout.write("%d/%d\t" % (batch+1, num_batch))
                 sys.stdout.flush()
@@ -133,7 +134,7 @@ class Experiment():
         print(msg)
         self.log_file.write(msg + "\n")
         pickle.dump([self.train_stats, self.valid_stats, self.test_stats],
-                    open(os.path.join(self.option.this_expsdir, "results.pckl"), "w"))
+                    open(os.path.join(self.option.this_expsdir, "results.pckl"), "wb"))
 
     def get_predictions(self):
         if self.option.query_is_language:
@@ -145,7 +146,7 @@ class Experiment():
         if self.option.get_phead:
             f_p = open(os.path.join(self.option.this_expsdir, "test_preds_and_probs.txt"), "w")
         all_in_top = []
-        for batch in xrange(self.data.num_batch_test):
+        for batch in range(self.data.num_batch_test):
             if (batch+1) % max(1, (self.data.num_batch_test / self.option.print_per_batch)) == 0:
                 sys.stdout.write("%d/%d\t" % (batch+1, self.data.num_batch_test))
                 sys.stdout.flush()
@@ -157,13 +158,14 @@ class Experiment():
             for i, (q, h, t) in enumerate(zip(qq, hh, tt)):
                 p_head = predictions_this_batch[i, h]
                 if self.option.adv_rank:
-                    eval_fn = lambda (j, p): p >= p_head and (j != h)
+                    eval_fn = lambda j_p: j_p[1] >= p_head and (j_p[0] != h)
                 elif self.option.rand_break:
-                    eval_fn = lambda (j, p): (p > p_head) or ((p == p_head) and (j != h) and (np.random.uniform() < 0.5))
+                    eval_fn = lambda j_p: (j_p[1] > p_head) or ((j_p[1] == p_head) and (j_p[0] != h) and (np.random.uniform() < 0.5))
                 else:
-                    eval_fn = lambda (j, p): (p > p_head)
+                    eval_fn = lambda j_p: (j_p[1] > p_head)
                 this_predictions = filter(eval_fn, enumerate(predictions_this_batch[i, :]))
                 this_predictions = sorted(this_predictions, key=lambda x: x[1], reverse=True)
+
                 if self.option.query_is_language:
                     all_num_preds.append(len(this_predictions))
                     mistake = False
@@ -224,7 +226,7 @@ class Experiment():
             if self.option.query_is_language:
                 queries = [tuple(q) for q in queries]
 
-            for i in xrange(len(queries)):
+            for i in range(len(queries)):
                 all_attention_operators[queries[i]] \
                                         = [[attn[i] 
                                         for attn in attn_step] 
@@ -233,7 +235,7 @@ class Experiment():
                                         [attn_step[i, :] 
                                         for attn_step in attention_memories]
         pickle.dump([all_attention_operators, all_attention_memories], 
-                    open(os.path.join(self.option.this_expsdir, "attentions.pckl"), "w"))
+                    open(os.path.join(self.option.this_expsdir, "attentions.pckl"), "wb"))
                
         msg = self.msg_with_time("Attentions collected.")
         print(msg)
@@ -264,7 +266,7 @@ class Experiment():
                                              self.option.query_is_language)
 
         pickle.dump(all_listed_rules, 
-                    open(os.path.join(self.option.this_expsdir, "rules.pckl"), "w"))
+                    open(os.path.join(self.option.this_expsdir, "rules.pckl"), "wb"))
         with open(os.path.join(self.option.this_expsdir, "rules.txt"), "w") as f:
             for line in all_printed_rules:
                 f.write(line + "\n")
@@ -279,7 +281,7 @@ class Experiment():
         self.log_file.write(msg + "\n")
         
         vocab_embed_file = os.path.join(self.option.this_expsdir, "vocab_embed.pckl")
-        pickle.dump({"embedding": vocab_embedding, "labels": self.data.query_vocab_to_number}, open(vocab_embed_file, "w"))
+        pickle.dump({"embedding": vocab_embedding, "labels": self.data.query_vocab_to_number}, open(vocab_embed_file, "wb"))
         msg = self.msg_with_time("Vocabulary embedding stored.")
         print(msg)
         self.log_file.write(msg + "\n")

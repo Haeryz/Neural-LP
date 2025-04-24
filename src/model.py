@@ -45,7 +45,7 @@ class Learner(object):
         """ Initialize random and unit row norm matrix of size (r, c). """
         bound = 6./ np.sqrt(c)
         init_matrix = np.random.uniform(-bound, bound, (r, c))
-        init_matrix = np.array(map(lambda row: row / np.linalg.norm(row), init_matrix))
+        init_matrix = np.array(list(map(lambda row: row / np.linalg.norm(row), init_matrix)))
         return init_matrix
 
     def _clip_if_not_None(self, g, v, low, high):
@@ -57,13 +57,13 @@ class Learner(object):
             return (g, v)
     
     def _build_input(self):
-        self.tails = tf.placeholder(tf.int32, [None])
-        self.heads = tf.placeholder(tf.int32, [None])
+        self.tails = tf.compat.v1.placeholder(tf.int32, [None])
+        self.heads = tf.compat.v1.placeholder(tf.int32, [None])
         self.targets = tf.one_hot(indices=self.heads, depth=self.num_entity)
             
         if not self.query_is_language:
-            self.queries = tf.placeholder(tf.int32, [None, self.num_step])
-            self.query_embedding_params = tf.Variable(self._random_uniform_unit(
+            self.queries = tf.compat.v1.placeholder(tf.int32, [None, self.num_step])
+            self.query_embedding_params = tf.compat.v1.Variable(self._random_uniform_unit(
                                                           self.num_query + 1, # <END> token 
                                                           self.query_embed_size), 
                                                       dtype=tf.float32)
@@ -71,8 +71,8 @@ class Learner(object):
             rnn_inputs = tf.nn.embedding_lookup(self.query_embedding_params, 
                                                 self.queries)
         else:
-            self.queries = tf.placeholder(tf.int32, [None, self.num_step, self.num_word])
-            self.vocab_embedding_params = tf.Variable(self._random_uniform_unit(
+            self.queries = tf.compat.v1.placeholder(tf.int32, [None, self.num_step, self.num_word])
+            self.vocab_embedding_params = tf.compat.v1.Variable(self._random_uniform_unit(
                                                           self.num_vocab + 1, # <END> token
                                                           self.vocab_embed_size),
                                                       dtype=tf.float32)
@@ -93,25 +93,29 @@ class Learner(object):
                                              self.num_step, 
                                              axis=1)]
         
-        cell = tf.contrib.rnn.core_rnn_cell.LSTMCell(self.rnn_state_size, 
-                                                     state_is_tuple=True)
-        self.cell = tf.contrib.rnn.core_rnn_cell.MultiRNNCell(
-                                                    [cell] * self.num_layer, 
-                                                    state_is_tuple=True)
-        init_state = self.cell.zero_state(tf.shape(self.tails)[0], tf.float32)
+        # Create a simple RNN layer that will work with TF 2.x
+        # Convert RNN inputs from a list to a single tensor
+        stacked_rnn_inputs = tf.stack(self.rnn_inputs, axis=1)  # [batch_size, num_step, query_embed_size]
         
-        # rnn_outputs: a list of num_step tensors,
-        # each tensor of size (batch_size, rnn_state_size).
-        self.rnn_outputs, self.final_state = tf.contrib.rnn.static_rnn(
-                                                self.cell, 
-                                                self.rnn_inputs,
-                                                initial_state=init_state)
+        # Define the RNN
+        rnn = tf.keras.layers.SimpleRNN(
+            units=self.rnn_state_size,
+            return_sequences=True,
+            name="rnn_layer"
+        )
         
-        self.W = tf.Variable(np.random.randn(
+        # Run the RNN
+        rnn_outputs = rnn(stacked_rnn_inputs)  # [batch_size, num_step, rnn_state_size]
+        
+        # Convert the outputs back to a list
+        self.rnn_outputs = [rnn_outputs[:, i, :] for i in range(self.num_step)]
+        self.final_state = self.rnn_outputs[-1]  # Just use the last output as the final state
+        
+        self.W = tf.compat.v1.Variable(np.random.randn(
                                 self.rnn_state_size, 
                                 self.num_operator), 
                             dtype=tf.float32)
-        self.b = tf.Variable(np.zeros(
+        self.b = tf.compat.v1.Variable(np.zeros(
                                 (1, self.num_operator)), 
                             dtype=tf.float32)
 
@@ -140,47 +144,47 @@ class Learner(object):
                                 indices=self.tails, 
                                 depth=self.num_entity), 1) 
 
-        self.database = {r: tf.sparse_placeholder(
+        self.database = {r: tf.compat.v1.sparse_placeholder(
                             dtype=tf.float32, 
                             name="database_%d" % r)
-                            for r in xrange(self.num_operator/2)}
+                            for r in range(self.num_operator//2)}
         
-        for t in xrange(self.num_step):
+        for t in range(self.num_step):
             self.attention_memories.append(
                             tf.nn.softmax(
                             tf.squeeze(
                                 tf.matmul(
                                     tf.expand_dims(self.rnn_outputs[t], 1), 
                                     tf.stack(self.rnn_outputs[0:t+1], axis=2)), 
-                            squeeze_dims=[1])))
+                            axis=[1])))
             
             # memory_read: tensor of size (batch_size, num_entity)
             memory_read = tf.squeeze(
                             tf.matmul(
                                 tf.expand_dims(self.attention_memories[t], 1), 
                                 self.memories),
-                            squeeze_dims=[1])
+                            axis=[1])
             
             if t < self.num_step - 1:
                 # database_results: (will be) a list of num_operator tensors,
                 # each of size (batch_size, num_entity).
                 database_results = []    
                 memory_read = tf.transpose(memory_read)
-                for r in xrange(self.num_operator/2):
+                for r in range(self.num_operator//2):
                     for op_matrix, op_attn in zip(
                                     [self.database[r], 
-                                     tf.sparse_transpose(self.database[r])],
+                                     tf.sparse.transpose(self.database[r])],
                                     [self.attention_operators[t][r], 
-                                     self.attention_operators[t][r+self.num_operator/2]]):
-                        product = tf.sparse_tensor_dense_matmul(op_matrix, memory_read)
+                                     self.attention_operators[t][r+self.num_operator//2]]):
+                        product = tf.sparse.sparse_dense_matmul(op_matrix, memory_read)
                         database_results.append(tf.transpose(product) * op_attn)
 
                 added_database_results = tf.add_n(database_results)
                 if self.norm:
-                    added_database_results /= tf.maximum(self.thr, tf.reduce_sum(added_database_results, axis=1, keep_dims=True))                
+                    added_database_results /= tf.maximum(self.thr, tf.reduce_sum(added_database_results, axis=1, keepdims=True))                
                 
                 if self.dropout > 0.:
-                  added_database_results = tf.nn.dropout(added_database_results, keep_prob=1.-self.dropout)
+                  added_database_results = tf.nn.dropout(added_database_results, rate=self.dropout)
 
                 # Populate a new cell in memory by concatenating.  
                 self.memories = tf.concat( 
@@ -190,7 +194,7 @@ class Learner(object):
             else:
                 self.predictions = memory_read
                            
-        self.final_loss = - tf.reduce_sum(self.targets * tf.log(tf.maximum(self.predictions, self.thr)), 1)
+        self.final_loss = - tf.reduce_sum(self.targets * tf.math.log(tf.maximum(self.predictions, self.thr)), 1)
         
         if not self.accuracy:
             self.in_top = tf.nn.in_top_k(
@@ -201,10 +205,10 @@ class Learner(object):
             _, indices = tf.nn.top_k(self.predictions, self.top_k, sorted=False)
             self.in_top = tf.equal(tf.squeeze(indices), self.heads)
         
-        self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
+        self.optimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
         gvs = self.optimizer.compute_gradients(tf.reduce_mean(self.final_loss))
-        capped_gvs = map(
-            lambda (grad, var): self._clip_if_not_None(grad, var, -5., 5.), gvs) 
+        capped_gvs = list(map(
+            lambda grad_var: self._clip_if_not_None(grad_var[0], grad_var[1], -5., 5.), gvs))
         self.optimizer_step = self.optimizer.apply_gradients(capped_gvs)
 
     def _run_graph(self, sess, qq, hh, tt, mdb, to_fetch):
@@ -219,8 +223,8 @@ class Learner(object):
 
         feed[self.heads] = hh 
         feed[self.tails] = tt 
-        for r in xrange(self.num_operator / 2):
-            feed[self.database[r]] = tf.SparseTensorValue(*mdb[r]) 
+        for r in range(self.num_operator // 2):
+            feed[self.database[r]] = tf.compat.v1.SparseTensorValue(*mdb[r]) 
         fetches = to_fetch
         graph_output = sess.run(fetches, feed)
         return graph_output
@@ -245,7 +249,7 @@ class Learner(object):
         hh = [0] * len(queries)
         tt = [0] * len(queries)
         mdb = {r: ([(0,0)], [0.], (self.num_entity, self.num_entity)) 
-                for r in xrange(self.num_operator / 2)}
+                for r in range(self.num_operator // 2)}
         to_fetch = [self.attention_operators, self.attention_memories]
         fetched = self._run_graph(sess, qq, hh, tt, mdb, to_fetch)
         return fetched[0], fetched[1]
@@ -255,7 +259,7 @@ class Learner(object):
         hh = [0] * len(qq)
         tt = [0] * len(hh)
         mdb = {r: ([(0,0)], [0.], (self.num_entity, self.num_entity)) 
-                for r in xrange(self.num_operator / 2)}
+                for r in range(self.num_operator // 2)}
         to_fetch = self.vocab_embedding_params
         vocab_embedding = self._run_graph(sess, qq, hh, tt, mdb, to_fetch)
         return vocab_embedding

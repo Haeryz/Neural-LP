@@ -2,6 +2,10 @@ import os
 import argparse
 import time
 import tensorflow as tf
+
+# Disable eager execution for TensorFlow 2.x
+tf.compat.v1.disable_eager_execution()
+
 import numpy as np
 from model import Learner
 from data import Data, DataPlus
@@ -72,7 +76,7 @@ def main():
       assert option.top_k == 1
     
     os.environ["CUDA_VISIBLE_DEVICES"] = option.gpu
-    tf.logging.set_verbosity(tf.logging.ERROR)
+    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
        
     if not option.query_is_language:
         data = Data(option.datadir, option.seed, option.type_check, option.domain_size, option.no_extra_facts)
@@ -102,15 +106,15 @@ def main():
     learner = Learner(option)
     print("Learner built.")
 
-    saver = tf.train.Saver(max_to_keep=option.max_epoch)
-    saver = tf.train.Saver()
-    config = tf.ConfigProto()
+    saver = tf.compat.v1.train.Saver(max_to_keep=option.max_epoch)
+    saver = tf.compat.v1.train.Saver()
+    config = tf.compat.v1.ConfigProto()
     config.gpu_options.allow_growth = False
     config.log_device_placement = False
     config.allow_soft_placement = True
-    with tf.Session(config=config) as sess:
-        tf.set_random_seed(option.seed)
-        sess.run(tf.global_variables_initializer())
+    with tf.compat.v1.Session(config=config) as sess:
+        tf.compat.v1.set_random_seed(option.seed)
+        sess.run(tf.compat.v1.global_variables_initializer())
         print("Session initialized.")
 
         if option.from_model_ckpt is not None:
