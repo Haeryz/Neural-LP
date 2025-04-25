@@ -13,9 +13,23 @@ import tensorflow as tf
 from collections import Counter
 from functools import reduce
 from math import ceil
+import sys
 
 # Disable eager execution for TensorFlow 2.x
 tf.compat.v1.disable_eager_execution()
+
+# Helper function to check if we're running in a notebook
+def is_notebook():
+    try:
+        shell = get_ipython().__class__.__name__
+        if shell == 'ZMQInteractiveShell':  # Jupyter notebook or qtconsole
+            return True
+        elif shell == 'TerminalInteractiveShell':  # Terminal IPython
+            return False
+        else:
+            return False  # Other type
+    except NameError:
+        return False  # Standard Python interpreter
 
 # Define the argument parser for use in both script mode and notebook mode
 parser = argparse.ArgumentParser(description="Experiment setup")
@@ -1346,102 +1360,111 @@ if __name__ == "__main__":
     # Import sys here because it was missing
     import sys
     
-    # ==========================================
-    # CELL 7: NOTEBOOK ENTRY POINT
-    # ==========================================
-    # When running in a notebook environment, use this section instead of main()
-    # Comment out this section if running as a script
-    
-    
-    # Set arguments for the experiment
-    args = [
-        "--seed", "42",
-        "--datadir", "../datasets/family",
-        "--batch_size", "32",
-        "--max_epoch", "5",
-        "--num_step", "3",
-        "--rnn_state_size", "128",
-        "--learning_rate", "0.001",
-        "--top_k", "10"
-    ]
-    
-    # Parse the arguments manually
-    parsed_args = parser.parse_args(args)
-    d = vars(parsed_args)
-    option = Option(d)
-    
-    # Set experiment tag
-    option.tag = time.strftime("%y-%m-%d-%H-%M")
-    
-    # Set CUDA visible devices
-    os.environ["CUDA_VISIBLE_DEVICES"] = option.gpu
-    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-    
-    # Set default data directory if none provided
-    if option.datadir is None:
-        option.datadir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "datasets", "family")
-        print(f"No datadir specified. Using default: {option.datadir}")
-
-    # Set default experiments directory
-    option.exps_dir = "../notebook_experiments"
-    if not os.path.exists(option.exps_dir):
-        os.makedirs(option.exps_dir)
-
-    # Load data
-    data = Data(option.datadir, option.seed, option.type_check, option.domain_size, option.no_extra_facts, option)
-    print("Data prepared.")
-
-    # Set options based on data
-    option.num_entity = data.num_entity
-    option.num_operator = data.num_operator
-    option.num_query = data.num_query
-
-    # Create experiment directory
-    option.this_expsdir = os.path.join(option.exps_dir, option.tag)
-    if not os.path.exists(option.this_expsdir):
-        os.makedirs(option.this_expsdir)
-    option.ckpt_dir = os.path.join(option.this_expsdir, "ckpt")
-    if not os.path.exists(option.ckpt_dir):
-        os.makedirs(option.ckpt_dir)
-    option.model_path = os.path.join(option.ckpt_dir, "model")
-
-    option.save()
-    print("Option saved.")
-
-    # Build learner
-    learner = Learner(option)
-    print("Learner built.")
-
-    # Create TensorFlow session
-    saver = tf.compat.v1.train.Saver(max_to_keep=option.max_epoch)
-    config = tf.compat.v1.ConfigProto()
-    config.gpu_options.allow_growth = True
-    config.log_device_placement = False
-    config.allow_soft_placement = True
-    
-    with tf.compat.v1.Session(config=config) as sess:
-        tf.compat.v1.set_random_seed(option.seed)
-        sess.run(tf.compat.v1.global_variables_initializer())
-        print("Session initialized.")
+    # Detect if we're in a notebook environment
+    if is_notebook():
+        # ==========================================
+        # CELL 7: NOTEBOOK ENTRY POINT
+        # ==========================================
+        # This code runs when in notebook environment
         
-        data.reset(option.batch_size)
-        experiment = Experiment(sess, saver, option, learner, data)
-        print("Experiment created.")
+        # IMPORTANT: In Colab/Jupyter, we need to ignore system arguments
+        # Don't use parser.parse_args() directly which would try to parse Jupyter's arguments
         
-        # Training
-        print("Start training...")
-        experiment.train()
+        # Set arguments for the experiment - use the same settings as in main.py
+        notebook_args = {
+            'seed': 33,                # Use same seed as default in main.py
+            'datadir': '../datasets/family',
+            'batch_size': 64,          # Use same batch size as default in main.py
+            'max_epoch': 10,           # Use same max epoch as default in main.py
+            'min_epoch': 5,            # Use same min epoch as default in main.py
+            'num_step': 3,
+            'rnn_state_size': 128,
+            'learning_rate': 0.001,
+            'top_k': 10,
+            'thr': 1e-20,              # Same as default in main.py
+            'dropout': 0.0,            # Same as default in main.py
+            'no_norm': False,          # Same as default in main.py
+            'gpu': ''                  # Empty string for CPU
+        }
         
-        # Get predictions
-        print("Start getting test predictions...")
-        experiment.get_predictions()
+        # Create option object directly from the dictionary
+        option = Option(notebook_args)
         
-        # Get rules
-        print("Start getting rules...")
-        experiment.get_rules()
+        # Set experiment tag
+        option.tag = time.strftime("%y-%m-%d-%H-%M")
         
-    experiment.close_log_file()
-    print("="*36 + "Finish" + "="*36)
-    
-    # Run the main function when executing as a script
-    main()
+        # Set CUDA visible devices
+        os.environ["CUDA_VISIBLE_DEVICES"] = option.gpu
+        tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+        
+        # Set default data directory if none provided
+        if option.datadir is None:
+            option.datadir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "datasets", "family")
+            print(f"No datadir specified. Using default: {option.datadir}")
+        
+        # Set default experiments directory
+        option.exps_dir = "../notebook_experiments"
+        if not os.path.exists(option.exps_dir):
+            os.makedirs(option.exps_dir)
+        
+        # Load data
+        data = Data(option.datadir, option.seed, option.type_check, option.domain_size, option.no_extra_facts, option)
+        print("Data prepared.")
+        
+        # Set options based on data
+        option.num_entity = data.num_entity
+        option.num_operator = data.num_operator
+        option.num_query = data.num_query
+        
+        # Create experiment directory
+        option.this_expsdir = os.path.join(option.exps_dir, option.tag)
+        if not os.path.exists(option.this_expsdir):
+            os.makedirs(option.this_expsdir)
+        option.ckpt_dir = os.path.join(option.this_expsdir, "ckpt")
+        if not os.path.exists(option.ckpt_dir):
+            os.makedirs(option.ckpt_dir)
+        option.model_path = os.path.join(option.ckpt_dir, "model")
+        
+        option.save()
+        print("Option saved.")
+        
+        # Build learner
+        learner = Learner(option)
+        print("Learner built.")
+        
+        # Create TensorFlow session
+        saver = tf.compat.v1.train.Saver(max_to_keep=option.max_epoch)
+        config = tf.compat.v1.ConfigProto()
+        config.gpu_options.allow_growth = True
+        config.log_device_placement = False
+        config.allow_soft_placement = True
+        
+        with tf.compat.v1.Session(config=config) as sess:
+            tf.compat.v1.set_random_seed(option.seed)
+            sess.run(tf.compat.v1.global_variables_initializer())
+            print("Session initialized.")
+            
+            data.reset(option.batch_size)
+            experiment = Experiment(sess, saver, option, learner, data)
+            print("Experiment created.")
+            
+            # Training
+            print("Start training...")
+            experiment.train()
+            
+            # Get predictions
+            if not option.no_preds:
+                print("Start getting test predictions...")
+                experiment.get_predictions()
+            
+            # Get rules
+            if not option.no_rules:
+                print("Start getting rules...")
+                experiment.get_rules()
+            
+        experiment.close_log_file()
+        print("="*36 + "Finish" + "="*36)
+        
+    else:
+        # Run the main function when executing as a script
+        main()
